@@ -181,7 +181,7 @@ void updateConnectionScore(const String& ssid, bool success, bool unauthorized) 
         connectionScores[ssid].success = true;
     }
     // Update the screen with the connection attempt
-    displayMACList();
+    
 }
 
 
