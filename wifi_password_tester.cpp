@@ -50,8 +50,7 @@ int getFoundSSIDCount() {
 void testPasswords(const char* ssidList[], int ssidCount, const std::vector<String>& passwordList) {
     int passwordCount = passwordList.size();
     bool ssidTested[ssidCount] = {false}; // Track tested SSIDs
-
-
+    unsigned long totalStartTime = millis(); // Start the total timer
 
     for (int left = 0, right = passwordCount - 1; left <= right; left++, right--) {
         bool allSSIDsTested = true;
@@ -60,20 +59,23 @@ void testPasswords(const char* ssidList[], int ssidCount, const std::vector<Stri
             if (ssidTested[i]) continue; // Skip already tested SSIDs
 
             const char* ssid = ssidList[i];
+            Serial.printf("-----------------\n");
             Serial.printf("Testing SSID: %s\n", ssid);
 
             // Test the left password
             String password = passwordList[left];
             Serial.printf("Testing Password: %s\n", password.c_str());
-            WiFi.begin(ssid, password.c_str());
+            
             unsigned long startAttemptTime = millis();
+            WiFi.begin(ssid, password.c_str());
             while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 1000) {
                 vTaskDelay(10 / portTICK_PERIOD_MS);  // Non-blocking delay
             }
 
             connectionResult = (WiFi.status() == WL_CONNECTED);
             if (connectionResult) {
-                Serial.printf("Successfully connected to %s\n", ssid);
+                unsigned long connectionTime = (millis() - startAttemptTime) / 1000;
+                Serial.printf("Successfully connected to %s in %lu seconds\n", ssid, connectionTime);
                 updateConnectionScore(ssid, true, false); // Update the screen with the connection attempt
                 ssidTested[i] = true; // Mark SSID as tested
                 WiFi.disconnect(true);
@@ -83,21 +85,25 @@ void testPasswords(const char* ssidList[], int ssidCount, const std::vector<Stri
                 updateConnectionScore(ssid, false, false); // Update the screen with the connection attempt
             }
             WiFi.disconnect(true);
-
+            Serial.printf("-----------------\n");
+            
             if (left == right) continue;
 
             // Test the right password
             password = passwordList[right];
+            
             Serial.printf("Testing Password: %s\n", password.c_str());
-            WiFi.begin(ssid, password.c_str());
+            
             startAttemptTime = millis();
+            WiFi.begin(ssid, password.c_str());
             while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 1000) {
                 vTaskDelay(10 / portTICK_PERIOD_MS);  // Non-blocking delay
             }
 
             connectionResult = (WiFi.status() == WL_CONNECTED);
             if (connectionResult) {
-                Serial.printf("Successfully connected to %s\n", ssid);
+                unsigned long connectionTime = (millis() - startAttemptTime) / 1000;
+                Serial.printf("Successfully connected to %s in %lu seconds\n", ssid, connectionTime);
                 updateConnectionScore(ssid, true, false); // Update the screen with the connection attempt
                 ssidTested[i] = true; // Mark SSID as tested
                 WiFi.disconnect(true);
@@ -106,6 +112,7 @@ void testPasswords(const char* ssidList[], int ssidCount, const std::vector<Stri
                 updateConnectionScore(ssid, false, false); // Update the screen with the connection attempt
             }
             WiFi.disconnect(true);
+            
         }
 
         // Check if all SSIDs have been tested
@@ -121,4 +128,7 @@ void testPasswords(const char* ssidList[], int ssidCount, const std::vector<Stri
             break;
         }
     }
+
+    unsigned long totalTime = (millis() - totalStartTime) / 1000;
+    Serial.printf("Total time taken for testing all SSIDs: %lu seconds\n", totalTime);
 }
