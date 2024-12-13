@@ -139,7 +139,7 @@ void displayMACList() {
     for (int i = start; i < end && it != macList.end(); ++i, ++it) {
         tft.setCursor(10, y);
         tft.print(it->first);
-        tft.setCursor(200, y);
+        tft.setCursor(100, y);
         if (connectionScores.find(it->first) != connectionScores.end()) {
             tft.print("Attempts: " + String(connectionScores[it->first].attempts) + " Success: " + (connectionScores[it->first].success ? "Yes" : "No"));
         } else {
