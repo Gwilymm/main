@@ -14,6 +14,7 @@
 std::vector<std::string> displayedMACs;
 std::map<String, unsigned long> lastAttemptTime;
 std::set<String> loggedUnauthorizedMACs;  // Set to track logged unauthorized MAC addresses
+
 const unsigned long COOLDOWN_PERIOD = 1000; // 1 second cooldown period
 
 // Shared data
@@ -38,6 +39,7 @@ String loadRandomPassword() {
     }
 }
 
+
 // Initialiser le point d'accès WiFi avec un mot de passe aléatoire
 void initializeWiFiHotspot() {
     chosenPassword = loadRandomPassword();
@@ -52,6 +54,7 @@ void initializeWiFiHotspot() {
     WiFi.softAP(ssid_ap, chosenPassword.c_str());
     IPAddress IP_AP = WiFi.softAPIP();
     Serial.println("WiFi Hotspot Initialized");
+    
     Serial.print("SSID (AP): ");
     Serial.println(ssid_ap);
     Serial.print("Password (AP): ");

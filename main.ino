@@ -30,12 +30,13 @@ void setup() {
 
     initializeBLE();                        // Initialise le BLE pour les fonctions de validation
     
-    initializePasswordTester();             // Initialize the password tester
     scanNetworks();                         // Scan and list networks
+    initializePromiscuousMode();            // Initialize promiscuous mode
+    //initializePasswordTester();            // Initialize the password tester
 
     // Create FreeRTOS tasks
-    xTaskCreate(testPasswordsTask, "TestPasswordsTask", 4096, NULL, 1, NULL);
-    xTaskCreate(handleWiFiConnectionsTask, "HandleWiFiConnectionsTask", 4096, NULL, 1, NULL);
+    //xTaskCreate(testPasswordsTask, "TestPasswordsTask", 4096, NULL, 1, NULL);
+    //xTaskCreate(handleWiFiConnectionsTask, "HandleWiFiConnectionsTask", 4096, NULL, 1, NULL);
 
     Serial.println("Setup completed");
 }
