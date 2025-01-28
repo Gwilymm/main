@@ -1,43 +1,40 @@
 #include <Arduino.h>
 #include <WiFi.h>
-#include "wifi_password_tester.h"
-#include "wifi_hotspot.h"  // Include the wifi_hotspot header to access the password list
-#include "tft_display.h"  // Include the tft_display header to update the screen
-#include <esp_wifi.h>  // Include the ESP WiFi library for debugging
+#include <vector>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include "wifi_hotspot.h"
+
 
 #define MAX_SSIDS 50
 static const char* foundSSIDs[MAX_SSIDS];
 static int foundSSIDCount = 0;
 
-bool testInProgress = false;  // Global variable to indicate if a test is in progress
-bool connectionResult = false;  // Global variable to store the connection result
+bool ssidTested[MAX_SSIDS] = {false}; // Suivi des SSIDs déjà testés
+bool connectionResult = false;       // Résultat de la connexion globale
+TaskHandle_t ssidTaskHandles[MAX_SSIDS] = {nullptr}; // Gestion des tâches pour chaque SSID
 
-void initializePasswordTester() {
-    // Any initialization code for the password tester
-}
+// Déclaration des mots de passe
+
 
 void scanNetworks() {
     Serial.println("Scanning for networks...");
     int n = WiFi.scanNetworks();
     foundSSIDCount = 0;
-    if (n == WIFI_SCAN_FAILED) {
-        Serial.println("WiFi scan failed");
-    } else if (n == 0) {
-        Serial.println("No networks found");
-    } else if (n < 0) {
-        Serial.printf("WiFi scan error: %d\n", n);
+
+    if (n <= 0) {
+        Serial.println(n == 0 ? "No networks found" : "WiFi scan failed");
     } else {
-        Serial.printf("%d networks found:\n", n);
         for (int i = 0; i < n && foundSSIDCount < MAX_SSIDS; ++i) {
             String ssid = WiFi.SSID(i);
             if (ssid.startsWith("wifi_m2dfs")) {
                 foundSSIDs[foundSSIDCount++] = strdup(ssid.c_str());
-                Serial.printf("%d: %s (%d)\n", foundSSIDCount, ssid.c_str(), WiFi.RSSI(i));
+                Serial.printf("%d: %s (RSSI: %d)\n", foundSSIDCount, ssid.c_str(), WiFi.RSSI(i));
             }
         }
     }
-    Serial.println("Scan complete");
 }
+
 
 const char** getFoundSSIDs() {
     return foundSSIDs;
@@ -47,88 +44,114 @@ int getFoundSSIDCount() {
     return foundSSIDCount;
 }
 
-void testPasswords(const char* ssidList[], int ssidCount, const std::vector<String>& passwordList) {
-    int passwordCount = passwordList.size();
-    bool ssidTested[ssidCount] = {false}; // Track tested SSIDs
-    unsigned long totalStartTime = millis(); // Start the total timer
+bool testPassword(const char* ssid, const String& password) {
+    Serial.printf("Testing SSID: %s with Password: %s\n", ssid, password.c_str());
+    unsigned long startAttemptTime = millis();
 
-    for (int left = 0, right = passwordCount - 1; left <= right; left++, right--) {
-        bool allSSIDsTested = true;
+    WiFi.begin(ssid, password.c_str());
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 1000) {
+        delay(10); // Vérification active
+    }
 
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("Successfully connected to %s with Password: %s\n", ssid, password.c_str());
+        WiFi.disconnect(true);
+        return true;
+    } else {
+        Serial.printf("Failed to connect to %s with Password: %s\n", ssid, password.c_str());
+        return false;
+    }
+}
+
+void testPasswords(const char* ssidList[], int ssidCount) {
+    int passwordCount = passwords.size(); // Utilisation directe de la liste extern
+    bool ssidTested[ssidCount] = {false}; // Suivi des SSIDs testés
+    unsigned long totalStartTime = millis(); // Démarrer le chronomètre global
+
+    for (int middle = passwordCount / 2, step = 1; step <= middle; ++step) {
         for (int i = 0; i < ssidCount; ++i) {
-            if (ssidTested[i]) continue; // Skip already tested SSIDs
+            if (ssidTested[i]) continue; // Ignorer les SSIDs déjà testés
 
             const char* ssid = ssidList[i];
-            Serial.printf("-----------------\n");
             Serial.printf("Testing SSID: %s\n", ssid);
 
-            // Test the left password
-            String password = passwordList[left];
-            Serial.printf("Testing Password: %s\n", password.c_str());
-            
-            unsigned long startAttemptTime = millis();
-            WiFi.begin(ssid, password.c_str());
-            while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 1000) {
-                vTaskDelay(10 / portTICK_PERIOD_MS);  // Non-blocking delay
-            }
-
-            connectionResult = (WiFi.status() == WL_CONNECTED);
-            if (connectionResult) {
-                unsigned long connectionTime = (millis() - startAttemptTime) / 1000;
-                Serial.printf("Successfully connected to %s in %lu seconds\n", ssid, connectionTime);
-                updateConnectionScore(ssid, true, false); // Update the screen with the connection attempt
-                ssidTested[i] = true; // Mark SSID as tested
-                WiFi.disconnect(true);
+            // Tester d'abord le mot de passe à gauche
+            String passwordLeft = passwords[middle - step];
+            if (testPassword(ssid, passwordLeft)) {
+                ssidTested[i] = true;
                 continue;
-            } else {
-                Serial.printf("Failed to connect to %s\n", ssid);
-                updateConnectionScore(ssid, false, false); // Update the screen with the connection attempt
-            }
-            WiFi.disconnect(true);
-            Serial.printf("-----------------\n");
-            
-            if (left == right) continue;
-
-            // Test the right password
-            password = passwordList[right];
-            
-            Serial.printf("Testing Password: %s\n", password.c_str());
-            
-            startAttemptTime = millis();
-            WiFi.begin(ssid, password.c_str());
-            while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 1000) {
-                vTaskDelay(10 / portTICK_PERIOD_MS);  // Non-blocking delay
             }
 
-            connectionResult = (WiFi.status() == WL_CONNECTED);
-            if (connectionResult) {
-                unsigned long connectionTime = (millis() - startAttemptTime) / 1000;
-                Serial.printf("Successfully connected to %s in %lu seconds\n", ssid, connectionTime);
-                updateConnectionScore(ssid, true, false); // Update the screen with the connection attempt
-                ssidTested[i] = true; // Mark SSID as tested
-                WiFi.disconnect(true);
-            } else {
-                Serial.printf("Failed to connect to %s\n", ssid);
-                updateConnectionScore(ssid, false, false); // Update the screen with the connection attempt
+            // Puis tester le mot de passe à droite
+            String passwordRight = passwords[middle + step];
+            if (testPassword(ssid, passwordRight)) {
+                ssidTested[i] = true;
+                continue;
             }
-            WiFi.disconnect(true);
-            
         }
 
-        // Check if all SSIDs have been tested
+        // Vérifier si tous les SSIDs ont été testés
+        bool allSSIDsTested = true;
         for (int i = 0; i < ssidCount; ++i) {
             if (!ssidTested[i]) {
                 allSSIDsTested = false;
                 break;
             }
         }
-
-        if (allSSIDsTested) {
-            Serial.println("All SSIDs have been tested.");
-            break;
-        }
+        if (allSSIDsTested) break; // Arrêter les tests si tout est terminé
     }
 
     unsigned long totalTime = (millis() - totalStartTime) / 1000;
     Serial.printf("Total time taken for testing all SSIDs: %lu seconds\n", totalTime);
+}
+
+void ssidTask(void* parameter) {
+    int ssidIndex = (int)parameter;
+    const char* ssid = foundSSIDs[ssidIndex];
+    int passwordCount = passwords.size();  // Utiliser passwords
+
+    int middle = passwordCount / 2;
+
+    // Tester en commençant par le milieu
+    if (!ssidTested[ssidIndex] && testPassword(ssid, passwords[middle])) {
+        vTaskDelete(nullptr); // Terminer la tâche si réussi
+        return;
+    }
+
+    // Tester en alternant autour du milieu
+    for (int left = middle - 1, right = middle + 1; left >= 0 || right < passwordCount; --left, ++right) {
+        if (left >= 0 && !ssidTested[ssidIndex] && testPassword(ssid, passwords[left])) {
+            vTaskDelete(nullptr);
+            return;
+        }
+        if (right < passwordCount && !ssidTested[ssidIndex] && testPassword(ssid, passwords[right])) {
+            vTaskDelete(nullptr);
+            return;
+        }
+    }
+
+    // Si tous les mots de passe ont échoué
+    Serial.printf("No password worked for SSID: %s\n", ssid);
+    vTaskDelete(nullptr); // Terminer la tâche
+}
+
+
+void testAllSSIDs() {
+    for (int i = 0; i < foundSSIDCount; ++i) {
+        if (ssidTaskHandles[i] == nullptr) {
+            xTaskCreatePinnedToCore(ssidTask, "SSIDTask", 4096, (void*)i, 1, &ssidTaskHandles[i], 0);
+        }
+    }
+
+    // Attendre que toutes les tâches soient terminées
+    for (int i = 0; i < foundSSIDCount; ++i) {
+        if (ssidTaskHandles[i] != nullptr) {
+            vTaskDelay(100 / portTICK_PERIOD_MS); // Donne un peu de temps aux tâches
+            while (eTaskGetState(ssidTaskHandles[i]) != eDeleted) {
+                vTaskDelay(100 / portTICK_PERIOD_MS); // Attendre la fin de la tâche
+            }
+        }
+    }
+
+    Serial.println("All SSIDs tested.");
 }
