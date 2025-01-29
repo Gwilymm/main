@@ -21,6 +21,7 @@ void testPasswordsTask(void* parameter) {
 void handleWiFiConnectionsTask(void* parameter) {
     while (true) {
         handleWiFiConnections();  // Gérer les connexions Wi-Fi
+
         vTaskDelay(100 / portTICK_PERIOD_MS);  // Attente non bloquante
     }
 }
@@ -47,7 +48,11 @@ void setup() {
 
     Serial.println("Setup completed");
 }
-
+ 
 void loop() {
+
+handleWiFiConnections();  
+
+delay(100);
     // Rien ici, tout est géré via les tâches FreeRTOS
 }

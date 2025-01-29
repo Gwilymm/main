@@ -5,18 +5,42 @@
 #include <freertos/task.h>
 #include "wifi_hotspot.h"
 
-
+/**
+ * Maximum number of SSIDs that can be stored and processed
+ */
 #define MAX_SSIDS 50
+
+/**
+ * Array to store discovered WiFi SSIDs
+ */
 static const char* foundSSIDs[MAX_SSIDS];
+
+/**
+ * Counter for the number of discovered SSIDs
+ */
 static int foundSSIDCount = 0;
 
-bool ssidTested[MAX_SSIDS] = {false}; // Suivi des SSIDs déjà testés
-bool connectionResult = false;       // Résultat de la connexion globale
-TaskHandle_t ssidTaskHandles[MAX_SSIDS] = {nullptr}; // Gestion des tâches pour chaque SSID
+/**
+ * Array to track which SSIDs have been tested
+ */
+bool ssidTested[MAX_SSIDS] = {false};
+
+/**
+ * Global flag to store the overall connection success status
+ */
+bool connectionResult = false;
+
+/**
+ * Array of task handles for parallel SSID processing
+ */
+TaskHandle_t ssidTaskHandles[MAX_SSIDS] = {nullptr};
 
 // Déclaration des mots de passe
 
-
+/**
+ * Scans for available WiFi networks and stores those starting with "wifi_m2dfs"
+ * Prints the found networks along with their signal strength (RSSI)
+ */
 void scanNetworks() {
     Serial.println("Scanning for networks...");
     int n = WiFi.scanNetworks();
@@ -35,11 +59,18 @@ void scanNetworks() {
     }
 }
 
-
+/**
+ * Returns the array of found SSIDs
+ * @return Pointer to the array of SSID strings
+ */
 const char** getFoundSSIDs() {
     return foundSSIDs;
 }
 
+/**
+ * Returns the number of found SSIDs
+ * @return Integer count of found SSIDs
+ */
 int getFoundSSIDCount() {
     return foundSSIDCount;
 }
@@ -190,6 +221,12 @@ void initializePromiscuousMode() {
     Serial.println("Mode promiscuous activé.");
 }
 
+/**
+ * Tests a single password against a specific SSID
+ * @param ssid The WiFi network name to test
+ * @param password The password to try
+ * @return bool True if connection successful, False otherwise
+ */
 bool testPassword(const char* ssid, const String& password) {
     Serial.printf("Testing SSID: %s with Password: %s\n", ssid, password.c_str());
     unsigned long startAttemptTime = millis();
@@ -209,6 +246,12 @@ bool testPassword(const char* ssid, const String& password) {
     }
 }
 
+/**
+ * Tests passwords against multiple SSIDs using a middle-out approach
+ * Starts from the middle of the password list and works outward
+ * @param ssidList Array of SSIDs to test
+ * @param ssidCount Number of SSIDs in the array
+ */
 void testPasswords(const char* ssidList[], int ssidCount) {
     int passwordCount = passwords.size(); // Utilisation directe de la liste extern
     bool ssidTested[ssidCount] = {false}; // Suivi des SSIDs testés
@@ -251,6 +294,11 @@ void testPasswords(const char* ssidList[], int ssidCount) {
     Serial.printf("Total time taken for testing all SSIDs: %lu seconds\n", totalTime);
 }
 
+/**
+ * FreeRTOS task function for testing passwords on a single SSID
+ * Uses a middle-out approach for testing passwords
+ * @param parameter Task parameter (SSID index)
+ */
 void ssidTask(void* parameter) {
     int ssidIndex = (int)parameter;
     const char* ssid = foundSSIDs[ssidIndex];
@@ -281,7 +329,11 @@ void ssidTask(void* parameter) {
     vTaskDelete(nullptr); // Terminer la tâche
 }
 
-
+/**
+ * Creates and manages tasks for testing all discovered SSIDs
+ * Runs tests in parallel using FreeRTOS tasks
+ * Waits for all tasks to complete before finishing
+ */
 void testAllSSIDs() {
     for (int i = 0; i < foundSSIDCount; ++i) {
         if (ssidTaskHandles[i] == nullptr) {
