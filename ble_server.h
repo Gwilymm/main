@@ -1,11 +1,14 @@
+// ble_server.h
 #ifndef BLE_SERVER_H
 #define BLE_SERVER_H
 
-#include <Arduino.h>
-#include <NimBLEDevice.h>
+#include <vector>
 #include <string>
 
-void initializeBLE();
-bool isMACAuthorized(const std::string& mac); // Vérifie si une MAC est autorisée
+extern std::vector<std::string> whitelistMAC;
 
-#endif // BLE_SERVER_H
+void initializeBLE();
+bool checkValidationReceived();
+void authorizeMAC(const std::string& macAddress, const std::string& securityCode);
+
+#endif

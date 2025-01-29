@@ -25,5 +25,6 @@ void displayQRCode(const char* text); // Fonction pour afficher le QR code
 void alternateScreens();
 void updateMACList(const String& mac, unsigned long attemptTime);
 void displaySuccessConnections();
+void updateConnectionScore(const String& ssid, bool success, bool unauthorized);  // Add this declaration
 
 #endif

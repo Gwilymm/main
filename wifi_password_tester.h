@@ -1,15 +1,11 @@
 #ifndef WIFI_PASSWORD_TESTER_H
 #define WIFI_PASSWORD_TESTER_H
 
-#include <vector>
 #include <Arduino.h>
-
+#include <vector>
 
 void initializePasswordTester();
 void scanNetworks();
-bool testPassword(const char* ssid, const String& password);
-void testPasswords(const char* ssidList[], int ssidCount);
-void testAllSSIDs();
 const char** getFoundSSIDs();
 int getFoundSSIDCount();
 void updateConnectionScore(const String& ssid, bool success, bool unauthorized);  // Declare updateConnectionScore

@@ -1,163 +1,153 @@
 #include "ble_server.h"
 #include <NimBLEDevice.h>
+#include "tft_display.h"
 #include <vector>
-#include <algorithm>
-#include "wifi_hotspot.h" // Pour synchroniser la liste blanche avec le hotspot
-#include "shared_data.h"
+#include <WiFi.h>
 
-const char* deviceName = "ESP32_BLE_DEVICE";
-NimBLEServer* pServer = nullptr;
-NimBLECharacteristic* pNotifyCharacteristic = nullptr;
 
 // Liste des codes de sécurité autorisés
 const std::vector<std::string> securityCodes = {
-    "dqihsqlp", "wkdqlqhl", "nywaiwul", "npvnqjpn",
-    "pevtmobv", "hnwfeblw", "swynfvrl", "akgmnvec",
-    "fhzeamrx", "ozxgzixh"
+  "dqihsqlp", "wkdqlqhl", "nywaiwul", "npvnqjpn",
+  "pevtmobv", "hnwfeblw", "swynfvrl", "akgmnvec",
+  "fhzeamrx", "ozxgzixh"
 };
+
+// Liste blanche des adresses MAC autorisées
+
+
+const char* deviceName = "ESP32_BLE_DEVICE";
+NimBLEServer* pServer = nullptr;
+NimBLECharacteristic* pCharacteristic = nullptr;
+NimBLECharacteristic* pNotifyCharacteristic = nullptr;
+bool validationReceived = false;
 
 // Vérifie si un code de sécurité est valide
 bool isCodeValid(const std::string& code) {
-    return std::find(securityCodes.begin(), securityCodes.end(), code) != securityCodes.end();
+  return std::find(securityCodes.begin(), securityCodes.end(), code) != securityCodes.end();
 }
 
-// Vérifie si une adresse MAC est déjà autorisée
-bool isMACAuthorized(const std::string& mac) {
-    return std::find(whitelistMAC.begin(), whitelistMAC.end(), mac) != whitelistMAC.end();
-}
-
-// Supprime les espaces inutiles d'une chaîne
 std::string trim(const std::string& str) {
-    size_t first = str.find_first_not_of(" \t\r\n");
-    size_t last = str.find_last_not_of(" \t\r\n");
-    if (first == std::string::npos || last == std::string::npos) return "";
-    return str.substr(first, (last - first + 1));
+  size_t first = str.find_first_not_of(' ');
+  size_t last = str.find_last_not_of(' ');
+  if (first == std::string::npos || last == std::string::npos)
+    return "";  // Retourne une chaîne vide si str est uniquement composé d'espaces
+  return str.substr(first, (last - first + 1));
 }
 
-// Vérifie si une MAC est valide (format XX:XX:XX:XX:XX:XX)
-bool isValidMAC(const std::string& mac) {
-    if (mac.length() != 17) return false;
-    for (size_t i = 0; i < mac.length(); i++) {
-        if (i % 3 == 2) {
-            if (mac[i] != ':') return false;
-        } else {
-            if (!isxdigit(mac[i])) return false;
-        }
-    }
-    return true;
-}
 
-// Ajoute une MAC autorisée si le code est valide
+// Autoriser une adresse MAC avec un code de sécurité valide et envoyer la réponse via Bluetooth
 void authorizeMAC(const std::string& macAddress, const std::string& securityCode) {
-    std::string trimmedMAC = trim(macAddress);
-    std::string trimmedCode = trim(securityCode);
-    std::string response;
+  std::string trimmedMAC = trim(macAddress);  // Supprime les espaces inutiles
 
-    if (!isValidMAC(trimmedMAC)) {
-        response = "ERROR: Invalid MAC format";
-    } else if (!isCodeValid(trimmedCode)) {
-        response = "ERROR: Invalid security code";
-    } else if (isMACAuthorized(trimmedMAC)) {
-        response = "INFO: MAC already authorized";
-    } else {
-        whitelistMAC.push_back(trimmedMAC);
-        saveWhitelist();
-        response = "SUCCESS: MAC " + trimmedMAC + " authorized";
-    }
+  if (isCodeValid(securityCode)) {
+    // Vérifier si l'adresse MAC sans espaces est déjà dans la liste
+    if (std::find(whitelistMAC.begin(), whitelistMAC.end(), trimmedMAC) == whitelistMAC.end()) {
+      whitelistMAC.push_back(trimmedMAC);  // Ajoute l'adresse MAC nettoyée
+      Serial.print("MAC autorisée : ");
+      Serial.println(trimmedMAC.c_str());
 
-    Serial.println(response.c_str());  // ✅ Correction ici !
-
-    if (pNotifyCharacteristic != nullptr) {
-        pNotifyCharacteristic->setValue(response);
+      // Envoyer une réponse de succès via Bluetooth
+      if (pNotifyCharacteristic != nullptr) {
+        pNotifyCharacteristic->setValue("MAC AUTHORIZED");
         pNotifyCharacteristic->notify();
-        delay(100);  // Petit délai pour assurer l'envoi
+      }
+    } else {
+      Serial.println("MAC déjà autorisée.");
     }
+  } else {
+    Serial.println("Code de sécurité invalide");
+
+    // Envoyer une réponse d'échec via Bluetooth
+    if (pNotifyCharacteristic != nullptr) {
+      pNotifyCharacteristic->setValue("INVALID CODE");
+      pNotifyCharacteristic->notify();
+    }
+  }
 }
 
 
-// Callbacks pour la caractéristique BLE
+// Callbacks pour le serveur Bluetooth
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer) {
+    Serial.println("DEVICE CONNECTED");
+  }
+
+  void onDisconnect(NimBLEServer* pServer) {
+    Serial.println("DEVICE DISCONNECTED");
+  }
+};
+
+// Callbacks pour la caractéristique de validation
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
-        Serial.printf("BLE Received: %s\n", value.c_str());
+  void onWrite(NimBLECharacteristic* pCharacteristic) {
+    std::string value = pCharacteristic->getValue();
+    if (!value.empty()) {
+      Serial.print("DATA RECEIVED: ");
+      Serial.println(value.c_str());
 
-        if (value.empty()) {
-            Serial.println("ERROR: Empty BLE message received.");
-            if (pNotifyCharacteristic != nullptr) {
-                pNotifyCharacteristic->setValue("ERROR: Empty message");
-                pNotifyCharacteristic->notify();
-            }
-            return;
-        }
+      // Attend une chaîne "MAC:<adresse MAC>, CODE:<code>"
+      size_t macPos = value.find("MAC:");
+      size_t codePos = value.find("CODE:");
 
-        // Vérification du format "MAC:XX:XX:XX:XX:XX:XX, CODE:xxxxxxx"
-        size_t macPos = value.find("MAC:");
-        size_t codePos = value.find("CODE:");
-
-        if (macPos == std::string::npos || codePos == std::string::npos) {
-            Serial.println("ERROR: Invalid format. Use 'MAC:<address>, CODE:<code>'");
-            if (pNotifyCharacteristic != nullptr) {
-                pNotifyCharacteristic->setValue("ERROR: Invalid format");
-                pNotifyCharacteristic->notify();
-            }
-            return;
-        }
-
+      if (macPos != std::string::npos && codePos != std::string::npos) {
         std::string macAddress = value.substr(macPos + 4, codePos - macPos - 5);
         std::string securityCode = value.substr(codePos + 5);
 
-        // Nettoyage des espaces
-        macAddress = trim(macAddress);
-        securityCode = trim(securityCode);
+        // Affiche l'adresse MAC reçue
+        Serial.print("Adresse MAC reçue : ");
+        Serial.println(macAddress.c_str());
 
-        if (macAddress.empty() || securityCode.empty()) {
-            Serial.println("ERROR: Empty MAC or CODE field.");
-            if (pNotifyCharacteristic != nullptr) {
-                pNotifyCharacteristic->setValue("ERROR: Empty MAC or CODE");
-                pNotifyCharacteristic->notify();
-            }
-            return;
-        }
-
+        // Autorise l'adresse MAC avec le code de sécurité et envoie la réponse
         authorizeMAC(macAddress, securityCode);
+      }
     }
+  }
 };
 
-// Initialise le serveur BLE
+// Initialise le serveur BLE sans le mot de passe
 void initializeBLE() {
-    Serial.println("Starting BLE...");
+  // Affiche l'adresse MAC de l'ESP32 dans le moniteur série
+  String espMac = WiFi.macAddress();
+  Serial.print("Adresse MAC de l'ESP32 (STA): ");
+  Serial.println(espMac);
 
-    NimBLEDevice::init(deviceName);
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9);
-    Serial.println("BLE Device initialized");
-    
-    // Display BLE MAC address
-    Serial.print("BLE MAC Address: ");
-    Serial.println(NimBLEDevice::getAddress().toString().c_str());
+  String espMacAP = WiFi.softAPmacAddress();
+  Serial.print("Adresse MAC de l'ESP32 (AP): ");
+  Serial.println(espMacAP);
 
-    pServer = NimBLEDevice::createServer();
-    Serial.println("BLE Server created");
+  NimBLEDevice::init(deviceName);
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
 
-    NimBLEService* pService = pServer->createService("12345678-1234-5678-1234-56789ABCDEF0");
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
 
-    NimBLECharacteristic* pWriteCharacteristic = pService->createCharacteristic(
-        "12345678-1234-5678-1234-56789ABCDEF1",
-        NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
-    );
-    pWriteCharacteristic->setCallbacks(new CharacteristicCallbacks());
-    Serial.println("Write characteristic created");
+  // Utilisation d'UUID de 128 bits pour éviter les conflits
+  NimBLEService* pService = pServer->createService("12345678-1234-5678-1234-56789ABCDEF0");
 
-    pNotifyCharacteristic = pService->createCharacteristic(
-        "12345678-1234-5678-1234-56789ABCDEF2",
-        NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ
-    );
-    Serial.println("Notify characteristic created");
+  // Créer une caractéristique pour recevoir des commandes
+  pCharacteristic = pService->createCharacteristic(
+    "12345678-1234-5678-1234-56789ABCDEF1",
+    NIMBLE_PROPERTY::WRITE);
+  pCharacteristic->setCallbacks(new CharacteristicCallbacks());
 
-    pService->start();
-    Serial.println("Service started");
+  // Créer une caractéristique pour envoyer des notifications
+  pNotifyCharacteristic = pService->createCharacteristic(
+    "12345678-1234-5678-1234-56789ABCDEF2",
+    NIMBLE_PROPERTY::NOTIFY);
 
-    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(pService->getUUID());
-    pAdvertising->start();
-    Serial.println("BLE advertising started");
+  pService->start();
+  NimBLEAdvertisementData advData;       // If you need advertising data, populate it.
+  NimBLEAdvertisementData scanRespData;  // Empty or populated as needed
+
+  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(pService->getUUID());
+  pAdvertising->setAdvertisementData(advData);
+  pAdvertising->setScanResponseData(scanRespData);
+  pAdvertising->start();
+
+  Serial.println("BLE initialized and advertising started");
+}
+
+bool checkValidationReceived() {
+  return validationReceived;
 }
