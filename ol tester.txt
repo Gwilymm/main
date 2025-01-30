@@ -1,0 +1,178 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <vector>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include "wifi_hotspot.h"
+
+
+#define MAX_SSIDS 50
+static const char* foundSSIDs[MAX_SSIDS];
+static int foundSSIDCount = 0;
+
+bool ssidTested[MAX_SSIDS] = {false}; // Suivi des SSIDs déjà testés
+bool connectionResult = false;       // Résultat de la connexion globale
+TaskHandle_t ssidTaskHandles[MAX_SSIDS] = {nullptr}; // Gestion des tâches pour chaque SSID
+
+// Déclaration des mots de passe
+
+
+void scanNetworks() {
+    Serial.println("Scanning for networks...");
+    int n = WiFi.scanNetworks();
+    foundSSIDCount = 0;
+
+    if (n <= 0) {
+        Serial.println(n == 0 ? "No networks found" : "WiFi scan failed");
+    } else {
+        for (int i = 0; i < n && foundSSIDCount < MAX_SSIDS; ++i) {
+            String ssid = WiFi.SSID(i);
+            if (ssid.startsWith("wifi_m2dfs")) {
+                foundSSIDs[foundSSIDCount++] = strdup(ssid.c_str());
+                Serial.printf("%d: %s (RSSI: %d)\n", foundSSIDCount, ssid.c_str(), WiFi.RSSI(i));
+            }
+        }
+    }
+}
+
+
+const char** getFoundSSIDs() {
+    return foundSSIDs;
+}
+
+int getFoundSSIDCount() {
+    return foundSSIDCount;
+}
+
+bool testPassword(const char* ssid, const String& password) {
+    Serial.printf("Testing SSID: %s with Password: %s\n", ssid, password.c_str());
+    unsigned long startAttemptTime = millis();
+
+    WiFi.begin(ssid, password.c_str());
+    while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 1000) {
+        delay(10); // Vérification active
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.printf("Successfully connected to %s with Password: %s\n", ssid, password.c_str());
+        WiFi.disconnect(true);
+        return true;
+    } else {
+        Serial.printf("Failed to connect to %s with Password: %s\n", ssid, password.c_str());
+        return false;
+    }
+}
+
+void testPasswords(const char* ssidList[], int ssidCount) {
+    int passwordCount = passwords.size(); // Utilisation directe de la liste extern
+    bool ssidTested[ssidCount] = {false}; // Suivi des SSIDs testés
+    unsigned long totalStartTime = millis(); // Démarrer le chronomètre global
+
+    for (int middle = passwordCount / 2, step = 1; step <= middle; ++step) {
+        for (int i = 0; i < ssidCount; ++i) {
+            if (ssidTested[i]) continue; // Ignorer les SSIDs déjà testés
+
+            const char* ssid = ssidList[i];
+            Serial.printf("Testing SSID: %s\n", ssid);
+
+            // Tester d'abord le mot de passe à gauche
+            String passwordLeft = passwords[middle - step];
+            if (testPassword(ssid, passwordLeft)) {
+                ssidTested[i] = true;
+                continue;
+            }
+
+            // Puis tester le mot de passe à droite
+            String passwordRight = passwords[middle + step];
+            if (testPassword(ssid, passwordRight)) {
+                ssidTested[i] = true;
+                continue;
+            }
+        }
+
+        // Vérifier si tous les SSIDs ont été testés
+        bool allSSIDsTested = true;
+        for (int i = 0; i < ssidCount; ++i) {
+            if (!ssidTested[i]) {
+                allSSIDsTested = false;
+                break;
+            }
+        }
+        if (allSSIDsTested) break; // Arrêter les tests si tout est terminé
+    }
+
+    unsigned long totalTime = (millis() - totalStartTime) / 1000;
+    Serial.printf("Total time taken for testing all SSIDs: %lu seconds\n", totalTime);
+}
+
+void ssidTask(void* parameter) {
+    int ssidIndex = (int)parameter;
+    const char* ssid = foundSSIDs[ssidIndex];
+    int passwordCount = passwords.size();  // Utiliser passwords
+
+    int middle = passwordCount / 2;
+
+    // Tester en commençant par le milieu
+    if (!ssidTested[ssidIndex] && testPassword(ssid, passwords[middle])) {
+        vTaskDelete(nullptr); // Terminer la tâche si réussi
+        return;
+    }
+
+    // Tester en alternant autour du milieu
+    for (int left = middle - 1, right = middle + 1; left >= 0 || right < passwordCount; --left, ++right) {
+        if (left >= 0 && !ssidTested[ssidIndex] && testPassword(ssid, passwords[left])) {
+            vTaskDelete(nullptr);
+            return;
+        }
+        if (right < passwordCount && !ssidTested[ssidIndex] && testPassword(ssid, passwords[right])) {
+            vTaskDelete(nullptr);
+            return;
+        }
+    }
+
+    // Si tous les mots de passe ont échoué
+    Serial.printf("No password worked for SSID: %s\n", ssid);
+    vTaskDelete(nullptr); // Terminer la tâche
+}
+
+void freeFoundSSIDs() {
+    for (int i = 0; i < foundSSIDCount; ++i) {
+        free((void*)foundSSIDs[i]); // Libère la mémoire
+        foundSSIDs[i] = nullptr;
+    }
+    foundSSIDCount = 0;
+}
+
+void testAllSSIDs() {
+    Serial.println("Début des tests pour tous les SSIDs...");
+
+    for (int i = 0; i < foundSSIDCount; ++i) {
+        if (ssidTaskHandles[i] == nullptr && foundSSIDs[i] != nullptr) {
+            if (xTaskCreatePinnedToCore(ssidTask, "SSIDTask", 4096, (void*)i, 1, &ssidTaskHandles[i], 0) != pdPASS) {
+                Serial.printf("Erreur : Impossible de créer la tâche pour SSID %d\n", i);
+                ssidTaskHandles[i] = nullptr;
+            }
+        } else {
+            Serial.printf("Erreur : SSID %d est invalide ou tâche déjà créée.\n", i);
+        }
+    }
+
+    // Attendre que toutes les tâches soient terminées
+    for (int i = 0; i < foundSSIDCount; ++i) {
+        if (ssidTaskHandles[i] != nullptr) {
+            unsigned long startTime = millis();
+            while (eTaskGetState(ssidTaskHandles[i]) != eDeleted) {
+                vTaskDelay(100 / portTICK_PERIOD_MS);
+                if (millis() - startTime > 10000) { // Timeout après 10 secondes
+                    Serial.printf("Timeout pour la tâche SSID %d\n", i);
+                    break;
+                }
+            }
+            ssidTaskHandles[i] = nullptr; // Libère le handle une fois terminé ou timeout
+        }
+    }
+
+    freeFoundSSIDs(); // Libère la mémoire des SSIDs
+    Serial.println("Tous les SSIDs ont été testés.");
+}
+

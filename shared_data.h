@@ -1,21 +1,11 @@
-#ifndef WIFI_HOTSPOT_H
-#define WIFI_HOTSPOT_H
-
-#include <WiFi.h>
-#include <SPIFFS.h>
-#include <esp_wifi.h>
+#pragma once
 #include <vector>
 #include <set>
 #include <map>
-#include <string>
+#include <Arduino.h>
 
+// Shared data declarations
 extern std::vector<std::string> whitelistMAC;
 extern std::set<String> loggedUnauthorizedMACs;
 extern std::map<String, unsigned long> lastAttemptTime;
 extern const unsigned long COOLDOWN_PERIOD;
-extern const std::vector<String> passwords;
-
-void initializeWiFiHotspot();
-void handleWiFiConnections();
-
-#endif

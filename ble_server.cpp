@@ -13,7 +13,7 @@ const std::vector<std::string> securityCodes = {
 };
 
 // Liste blanche des adresses MAC autorisées
-std::vector<std::string> whitelistMAC;
+
 
 const char* deviceName = "ESP32_BLE_DEVICE";
 NimBLEServer* pServer = nullptr;
